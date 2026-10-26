@@ -1,4 +1,4 @@
 fastapi
 uvicorn
-libsql-experimental
+libsql-client
 pydantic
