@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import libsql_experimental as libsql
+import libsql_client as libsql
 import os
 
 app = FastAPI(title="API Catastro RUC SRI")
