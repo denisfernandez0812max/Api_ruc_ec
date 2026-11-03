@@ -58,7 +58,8 @@ def consultar_ruc(numero: str):
     elif len(numero) != 13:
         raise HTTPException(status_code=400, detail="Debe ingresar una cédula (10 dígitos) o un RUC (13 dígitos).")
 
-    query = "SELECT * FROM contribuyentes WHERE ruc LIKE ?"
+    # ✅ AGREGADO LIMIT 10 PARA EVITAR QUE SE CUELGUE SI HAY MUCHAS SUCURSALES
+    query = "SELECT * FROM contribuyentes WHERE ruc LIKE ? LIMIT 10"
 
     try:
         if TURSO_URL and TURSO_TOKEN:
