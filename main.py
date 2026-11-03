@@ -1,13 +1,13 @@
 import os
+import time
 from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware  # 🆕 IMPORTANTE
+from fastapi.middleware.cors import CORSMiddleware
 import libsql
 
 app = FastAPI(title="API Catastro RUC SRI - Ecuador Completo")
 
-# 🆕 CONFIGURACIÓN DE CORS (Permite llamadas directas desde el POS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,7 +46,7 @@ class Contribuyente(BaseModel):
 
 @app.get("/")
 def inicio():
-    return {"mensaje": "API de RUC funcionando. Use /api/ruc/{numero}"}
+    return {"mensaje": "API de RUC funcionando", "url1": TURSO_URL[:25] if TURSO_URL else "vacía", "url2": TURSO_URL_2[:25] if TURSO_URL_2 else "vacía"}
 
 @app.get("/api/ruc/{numero}", response_model=List[Contribuyente])
 def consultar_ruc(numero: str):
@@ -58,31 +58,48 @@ def consultar_ruc(numero: str):
     elif len(numero) != 13:
         raise HTTPException(status_code=400, detail="Debe ingresar una cédula (10 dígitos) o un RUC (13 dígitos).")
 
-    # ✅ AGREGADO LIMIT 10 PARA EVITAR QUE SE CUELGUE SI HAY MUCHAS SUCURSALES
     query = "SELECT * FROM contribuyentes WHERE ruc LIKE ? LIMIT 10"
+    inicio_total = time.time()
 
-    try:
-        if TURSO_URL and TURSO_TOKEN:
+    if TURSO_URL and TURSO_TOKEN:
+        t0 = time.time()
+        try:
             conn1 = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+            t1 = time.time()
+            print(f"⏱️ DB1 Conexión: {t1-t0:.2f}s (URL: {TURSO_URL[:30]})")
+            
             cur1 = conn1.execute(query, (numero + '%',)) 
+            t2 = time.time()
+            print(f"⏱️ DB1 Query: {t2-t1:.2f}s")
+            
             columnas = [col[0] for col in cur1.description]
             rows = cur1.fetchall()
             conn1.close()
             if rows:
+                print(f"⏱️ DB1 TOTAL: {time.time()-inicio_total:.2f}s")
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
-    except Exception as e:
-        print(f"Error en DB1: {e}")
+        except Exception as e:
+            print(f"❌ Error en DB1 (después de {time.time()-t0:.2f}s): {e}")
 
-    try:
-        if TURSO_URL_2 and TURSO_TOKEN_2:
+    if TURSO_URL_2 and TURSO_TOKEN_2:
+        t0 = time.time()
+        try:
             conn2 = libsql.connect(database=TURSO_URL_2, auth_token=TURSO_TOKEN_2)
+            t1 = time.time()
+            print(f"⏱️ DB2 Conexión: {t1-t0:.2f}s (URL: {TURSO_URL_2[:30]})")
+            
             cur2 = conn2.execute(query, (numero + '%',))
+            t2 = time.time()
+            print(f"⏱️ DB2 Query: {t2-t1:.2f}s")
+            
             columnas = [col[0] for col in cur2.description]
             rows = cur2.fetchall()
             conn2.close()
             if rows:
+                print(f"⏱️ DB2 TOTAL: {time.time()-inicio_total:.2f}s")
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
-    except Exception as e:
-        print(f"Error en DB2: {e}")
+        except Exception as e:
+            print(f"❌ Error en DB2 (después de {time.time()-t0:.2f}s): {e}")
 
+    print(f"⏱️ Búsqueda no encontrada. Total: {time.time()-inicio_total:.2f}s")
     raise HTTPException(status_code=404, detail="Cédula o RUC no encontrado en el catastro.")
