@@ -5,9 +5,13 @@ import libsql
 
 app = FastAPI(title="API Catastro RUC SRI")
 
-# Lee las variables ocultas desde Render (Environment)
+# --- VARIABLES DE ENTORNO PARA LA BASE DE DATOS 1 (22 Provincias) ---
 TURSO_URL = os.environ.get("TURSO_URL")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN")
+
+# --- VARIABLES DE ENTORNO PARA LA BASE DE DATOS 2 (Pichincha y Guayas) ---
+TURSO_URL_2 = os.environ.get("TURSO_URL_2")
+TURSO_TOKEN_2 = os.environ.get("TURSO_TOKEN_2")
 
 class Contribuyente(BaseModel):
     ruc: str
@@ -16,7 +20,7 @@ class Contribuyente(BaseModel):
 
 @app.get("/")
 def inicio():
-    return {"mensaje": "API de RUC funcionando correctamente"}
+    return {"mensaje": "API de RUC funcionando correctamente con doble base de datos"}
 
 @app.get("/api/ruc/{numero}", response_model=Contribuyente)
 def consultar_ruc(numero: str):
@@ -24,25 +28,40 @@ def consultar_ruc(numero: str):
     if not numero.isdigit():
         raise HTTPException(status_code=400, detail="El documento debe contener solo números.")
     
-    # 2. Si tiene 10 dígitos (Cédula), le agregamos '001' para buscar en la base de datos
+    # 2. Si tiene 10 dígitos (Cédula), le agregamos '001'
     if len(numero) == 10:
         numero = numero + "001"
-    # 3. Si no tiene 10 ni 13 dígitos, rechazamos la petición
+    # 3. Si no tiene 10 ni 13 dígitos, rechazamos
     elif len(numero) != 13:
         raise HTTPException(status_code=400, detail="Debe ingresar una cédula (10 dígitos) o un RUC (13 dígitos).")
 
-    # 4. Conectar a Turso y buscar
+    # 4. Buscar primero en la Base de Datos 1 (Provincias pequeñas)
     try:
-        conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-        cur = conn.execute("SELECT ruc, razon_social, estado FROM contribuyentes WHERE ruc = ?", (numero,))
-        row = cur.fetchone()
-        conn.close()
+        if TURSO_URL and TURSO_TOKEN:
+            conn1 = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+            cur1 = conn1.execute("SELECT ruc, razon_social, estado FROM contribuyentes WHERE ruc = ?", (numero,))
+            row = cur1.fetchone()
+            conn1.close()
+            
+            if row is not None:
+                print(f"RUC {numero} encontrado en DB1")
+                return Contribuyente(ruc=row[0], razon_social=row[1], estado=row[2])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error de base de datos: {type(e).__name__}: {e}")
+        print(f"Error en DB1: {e}")
 
-    # 5. Si no se encontró
-    if row is None:
-        raise HTTPException(status_code=404, detail="Cédula o RUC no encontrado en el catastro.")
-    
-    # 6. Devolver los datos
-    return Contribuyente(ruc=row[0], razon_social=row[1], estado=row[2])
+    # 5. Si no se encontró en DB1, buscar en la Base de Datos 2 (Pichincha/Guayas)
+    try:
+        if TURSO_URL_2 and TURSO_TOKEN_2:
+            conn2 = libsql.connect(database=TURSO_URL_2, auth_token=TURSO_TOKEN_2)
+            cur2 = conn2.execute("SELECT ruc, razon_social, estado FROM contribuyentes WHERE ruc = ?", (numero,))
+            row = cur2.fetchone()
+            conn2.close()
+            
+            if row is not None:
+                print(f"RUC {numero} encontrado en DB2")
+                return Contribuyente(ruc=row[0], razon_social=row[1], estado=row[2])
+    except Exception as e:
+        print(f"Error en DB2: {e}")
+
+    # 6. Si no se encontró en ninguna de las dos
+    raise HTTPException(status_code=404, detail="Cédula o RUC no encontrado en el catastro.")
