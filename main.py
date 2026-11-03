@@ -46,7 +46,7 @@ class Contribuyente(BaseModel):
 
 @app.get("/")
 def inicio():
-    return {"mensaje": "API de RUC funcionando", "url1": TURSO_URL[:25] if TURSO_URL else "vacía", "url2": TURSO_URL_2[:25] if TURSO_URL_2 else "vacía"}
+    return {"mensaje": "API de RUC funcionando"}
 
 @app.get("/api/ruc/{numero}", response_model=List[Contribuyente])
 def consultar_ruc(numero: str):
@@ -58,48 +58,50 @@ def consultar_ruc(numero: str):
     elif len(numero) != 13:
         raise HTTPException(status_code=400, detail="Debe ingresar una cédula (10 dígitos) o un RUC (13 dígitos).")
 
-    query = "SELECT * FROM contribuyentes WHERE ruc LIKE ? LIMIT 10"
+    # ✅ SOLUCIÓN: Búsqueda por RANGO para forzar el uso del índice
+    query = "SELECT * FROM contribuyentes WHERE ruc >= ? AND ruc < ? LIMIT 10"
+    
+    # Calculamos el rango: Ej. de '1713340295001' a '1713340295002'
+    num_min = numero
+    # Incrementamos el último dígito para el límite superior
+    num_max = numero[:-1] + chr(ord(numero[-1]) + 1)
+
     inicio_total = time.time()
 
     if TURSO_URL and TURSO_TOKEN:
         t0 = time.time()
         try:
             conn1 = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-            t1 = time.time()
-            print(f"⏱️ DB1 Conexión: {t1-t0:.2f}s (URL: {TURSO_URL[:30]})")
-            
-            cur1 = conn1.execute(query, (numero + '%',)) 
-            t2 = time.time()
-            print(f"⏱️ DB1 Query: {t2-t1:.2f}s")
-            
+            cur1 = conn1.execute(query, (num_min, num_max)) 
+            # ✅ Medimos el tiempo real de fetchall
+            t_fetch = time.time()
             columnas = [col[0] for col in cur1.description]
             rows = cur1.fetchall()
+            t_after_fetch = time.time()
+            
             conn1.close()
             if rows:
-                print(f"⏱️ DB1 TOTAL: {time.time()-inicio_total:.2f}s")
+                print(f"⏱️ DB1 Conexión: {t_fetch-t0:.2f}s | Fetchall: {t_after_fetch-t_fetch:.2f}s | TOTAL: {time.time()-inicio_total:.2f}s")
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
         except Exception as e:
-            print(f"❌ Error en DB1 (después de {time.time()-t0:.2f}s): {e}")
+            print(f"❌ Error en DB1: {e}")
 
     if TURSO_URL_2 and TURSO_TOKEN_2:
         t0 = time.time()
         try:
             conn2 = libsql.connect(database=TURSO_URL_2, auth_token=TURSO_TOKEN_2)
-            t1 = time.time()
-            print(f"⏱️ DB2 Conexión: {t1-t0:.2f}s (URL: {TURSO_URL_2[:30]})")
-            
-            cur2 = conn2.execute(query, (numero + '%',))
-            t2 = time.time()
-            print(f"⏱️ DB2 Query: {t2-t1:.2f}s")
-            
+            cur2 = conn2.execute(query, (num_min, num_max))
+            t_fetch = time.time()
             columnas = [col[0] for col in cur2.description]
             rows = cur2.fetchall()
+            t_after_fetch = time.time()
+            
             conn2.close()
             if rows:
-                print(f"⏱️ DB2 TOTAL: {time.time()-inicio_total:.2f}s")
+                print(f"⏱️ DB2 Conexión: {t_fetch-t0:.2f}s | Fetchall: {t_after_fetch-t_fetch:.2f}s | TOTAL: {time.time()-inicio_total:.2f}s")
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
         except Exception as e:
-            print(f"❌ Error en DB2 (después de {time.time()-t0:.2f}s): {e}")
+            print(f"❌ Error en DB2: {e}")
 
-    print(f"⏱️ Búsqueda no encontrada. Total: {time.time()-inicio_total:.2f}s")
+    print(f"⏱️ No encontrado. Total: {time.time()-inicio_total:.2f}s")
     raise HTTPException(status_code=404, detail="Cédula o RUC no encontrado en el catastro.")
