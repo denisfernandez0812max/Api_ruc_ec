@@ -2,19 +2,25 @@ import os
 from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware  # 🆕 IMPORTANTE
 import libsql
 
 app = FastAPI(title="API Catastro RUC SRI - Ecuador Completo")
 
-# --- CONEXIÓN BASE DE DATOS 1 (22 Provincias) ---
+# 🆕 CONFIGURACIÓN DE CORS (Permite llamadas directas desde el POS)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 TURSO_URL = os.environ.get("TURSO_URL")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN")
-
-# --- CONEXIÓN BASE DE DATOS 2 (Pichincha y Guayas) ---
 TURSO_URL_2 = os.environ.get("TURSO_URL_2")
 TURSO_TOKEN_2 = os.environ.get("TURSO_TOKEN_2")
 
-# Modelo Pydantic con las 21 columnas exactas
 class Contribuyente(BaseModel):
     ruc: str
     razon_social: str
@@ -44,47 +50,38 @@ def inicio():
 
 @app.get("/api/ruc/{numero}", response_model=List[Contribuyente])
 def consultar_ruc(numero: str):
-    # 1. Validación de cédula o RUC
     if not numero.isdigit():
         raise HTTPException(status_code=400, detail="El documento debe contener solo números.")
     
     if len(numero) == 10:
-        numero = numero + "001" # Convertir cédula en RUC (asumiendo establecimiento 001)
+        numero = numero + "001" 
     elif len(numero) != 13:
         raise HTTPException(status_code=400, detail="Debe ingresar una cédula (10 dígitos) o un RUC (13 dígitos).")
 
-    # ✅ RECOMENDACIÓN: Buscar por prefijo (LIKE) para no fallar si el 001 está cerrado
     query = "SELECT * FROM contribuyentes WHERE ruc LIKE ?"
 
-    # 2. Buscar en la Base de Datos 1
     try:
         if TURSO_URL and TURSO_TOKEN:
             conn1 = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-            cur1 = conn1.execute(query, (numero + '%',)) # El % busca cualquier terminación
-            
+            cur1 = conn1.execute(query, (numero + '%',)) 
             columnas = [col[0] for col in cur1.description]
             rows = cur1.fetchall()
             conn1.close()
-            
             if rows:
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
     except Exception as e:
         print(f"Error en DB1: {e}")
 
-    # 3. Si no está en la DB1, buscar en la Base de Datos 2
     try:
         if TURSO_URL_2 and TURSO_TOKEN_2:
             conn2 = libsql.connect(database=TURSO_URL_2, auth_token=TURSO_TOKEN_2)
             cur2 = conn2.execute(query, (numero + '%',))
-            
             columnas = [col[0] for col in cur2.description]
             rows = cur2.fetchall()
             conn2.close()
-            
             if rows:
                 return [Contribuyente(**dict(zip(columnas, row))) for row in rows]
     except Exception as e:
         print(f"Error en DB2: {e}")
 
-    # 4. Si no se encontró en ninguna
     raise HTTPException(status_code=404, detail="Cédula o RUC no encontrado en el catastro.")
